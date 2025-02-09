@@ -1,0 +1,199 @@
+// Cg/HLSL function implementations for GPU execution w/ compute shaders
+
+// Main functions
+#pragma kernel WaveKernel                   // 0
+#pragma kernel WaveZKernel                  // 1
+#pragma kernel MultiWaveKernel              // 2
+#pragma kernel MultiWaveZKernel             // 3
+#pragma kernel RippleKernel                 // 4    
+#pragma kernel RippleZKernel                // 5
+#pragma kernel SphereKernel                 // 6
+#pragma kernel SphereTwistKernel            // 7
+#pragma kernel TorusKernel                  // 8
+#pragma kernel WaveToWaveZKernel
+#pragma kernel WaveZToMultiWaveKernel
+#pragma kernel MultiWaveToMultiWaveZKernel
+#pragma kernel MultiWaveZToRippleKernel
+#pragma kernel RippleToRippleZKernel
+#pragma kernel RippleZToSphereKernel
+#pragma kernel SphereToSphereTwistKernel
+#pragma kernel SphereTwistToTorusKernel
+#pragma kernel TorusToWaveKernel
+
+// Macros
+#define PI 3.1415926535897932384626433832
+
+// Positions compute buffer (comes from DX11's Shader Mode 5)
+RWStructuredBuffer<float3> _PositionsBuffer;
+
+uint _Resolution;
+float _Step, _Time, _TransitionProgress;
+
+// Takes in the point's id as input, and calculates its xy coords.
+// * Adds 1/2 to xy because pivot pos is center of cube and we want edge, 
+// * Multiply by step to determine point spacing, then add starting pos. 
+// * Remember we are in range [-1, 1]
+float2 GetUV(uint3 id)
+{
+    return (id.xy + 0.5f) * _Step - 1.0f;
+}
+
+// Sets the position at point [ID] in the compute buffer.
+// * Indexes the buffer using the 1D to 2D conversion on [ID], x+(length)*y.
+// * Sets that indexed point in the buffer to the passed position.
+void SetPosition(uint3 id, float3 position)
+{
+    // 8x8 matrix, but if resolution is not evenly divisible by 8 then could index out of bounds
+    if (id.x < _Resolution && id.y < _Resolution)
+        _PositionsBuffer[id.x + id.y * _Resolution] = position;
+}
+
+// 8 threads (wavefronts/warps) in 2D, 8x8 matrix
+// Each thread is identified by 3 unsigned ints
+// Explicitly indicate param is for thread ID
+#define KERNEL_FUNCTION(function) \
+    [numthreads(8, 8, 1)] \
+    void function##Kernel(uint3 id : SV_DispatchThreadID) { \
+        float2 uv = GetUV(id); \
+        SetPosition(id, function(uv.x, uv.y, _Time)); \
+}
+
+#define KERNEL_MORPH_FUNCTION(funcFrom, funcTo) \
+    [numthreads(8, 8, 1)] \
+    void funcFrom##To##funcTo##Kernel(uint3 id : SV_DispatchThreadID) { \
+        float2 uv = GetUV(id); \
+        float3 position = lerp( funcFrom(uv.x, uv.y, _Time), funcTo(uv.x, uv.y, _Time), _TransitionProgress); \
+        SetPosition(id, position); \
+}
+
+// A sine wave animation that varies with time
+float3 Wave(float u, float v, float t)
+{
+    float3 f;
+    f.x = u;
+    f.y = sin(PI * (u + t));
+    f.z = v;
+    return f;
+}
+
+ // Extended wave function that varies on sin(u + v)
+float3 WaveZ(float u, float v, float t)
+{
+    float3 f;
+    f.x = u;
+    f.y = sin(PI * (u + v + t));
+    f.z = v;
+    return f;
+}
+
+float3 MultiWave(float u, float v, float t)
+{
+    float3 f;
+    f.x = u;
+    f.y = sin(PI * (u + 0.5 * t));
+    // This is [-1,1] + [-1/2,1/2] = [-3/2,3/2] so mult final result by 2/3 to keep in range [-1,1]
+    // var * (const/const) is more efficient than var/const
+    f.y += sin(2.0 * PI * (u + t)) * (1.0 / 2.0);
+    f.y *= (2.0 / 3.0);
+    f.z = v;
+    return f;
+}
+
+ // Extended multiwave function that varies on sin(u) + sin(v)   
+ float3 MultiWaveZ(float u, float v, float t)
+{
+    float3 f;
+    f.x = u;
+    f.y = sin(PI * (u + 0.5 * t));
+    f.y += sin(2.0 * PI * (v + t)) * (1.0 / 2.0);
+    f.y += sin(PI * (u + v + 0.25 * t));
+    f.y *= (1.0 / 2.5);
+    f.z = v;
+    return f;
+}
+
+ float3 Ripple(float u, float v, float t)
+{
+    float d = abs(u);
+    
+    float3 f;
+    f.x = u;
+    f.y = sin(PI * (4.0 * d - t)) / (1.0 + 10.0 * d);
+    f.z = v;
+    return f;
+}
+
+// Extended ripple function that spreads in all directions
+ float3 RippleZ(float u, float v, float t)
+{
+    float d = sqrt(u * u + v * v);
+    
+    float3 f;
+    f.x = u;
+    f.y = sin(PI * (4.0 * d - t)) / (1.0 + 10.0 * d);
+    f.z = v;
+    return f;
+}
+
+ float3 Sphere(float u, float v, float t)
+{
+    // Uniform radius
+    float r = 1.0 + 0.5 * sin(PI * t);
+    float s = r * cos(0.5 * PI * v);
+
+    float3 f;
+    f.x = s * sin(PI * u);
+    f.y = r * sin(0.5 * PI * v);
+    f.z = s * cos(PI * u);
+    return f;
+}
+
+ float3 SphereTwist(float u, float v, float t)
+{
+    float r = 0.1 * (9.0 + sin(PI * (12.0 * u + 8.0 * v + t)));
+    float s = r * cos(0.5 * PI * v);
+
+    float3 f;
+    f.x = s * sin(PI * u);
+    f.y = r * sin(0.5 * PI * v);
+    f.z = s * cos(PI * u);
+    return f;
+}
+
+ float3 Torus(float u, float v, float t)
+{
+    // Major radus, size of hole
+    float r1 = .7 + .1 * sin(PI * (8.0 * u + 0.5 * t));
+    // Minor radius, thickness of ring
+    float r2 = 3.0 / 20.0 + (1.0 / 20.0) * sin(PI * (16.0 * u + 8.0 * v + 3.0 * t));
+    float s = r1 + r2 * cos(PI * v);
+    
+    float3 f;
+    f.x = s * sin(PI * u);
+    f.y = r2 * sin(PI * v);
+    f.z = s * cos(PI * u);
+    return f;
+}
+
+// Everytime a new function is declared, add the KERNEL_FUNCTION definition here
+KERNEL_FUNCTION(Wave)
+KERNEL_FUNCTION(WaveZ)
+KERNEL_FUNCTION(MultiWave)
+KERNEL_FUNCTION(MultiWaveZ)
+KERNEL_FUNCTION(Ripple)
+KERNEL_FUNCTION(RippleZ)
+KERNEL_FUNCTION(Sphere)
+KERNEL_FUNCTION(SphereTwist)
+KERNEL_FUNCTION(Torus)
+
+// Everytime a new function is declared, add two KERNEL_MORPH_FUNCTIONs, to and from the new function
+// Currently my compute shader only supports transitioning in order
+KERNEL_MORPH_FUNCTION(Wave, WaveZ)
+KERNEL_MORPH_FUNCTION(WaveZ, MultiWave)
+KERNEL_MORPH_FUNCTION(MultiWave, MultiWaveZ)
+KERNEL_MORPH_FUNCTION(MultiWaveZ, Ripple)
+KERNEL_MORPH_FUNCTION(Ripple, RippleZ)
+KERNEL_MORPH_FUNCTION(RippleZ, Sphere)
+KERNEL_MORPH_FUNCTION(Sphere, SphereTwist)
+KERNEL_MORPH_FUNCTION(SphereTwist, Torus)
+KERNEL_MORPH_FUNCTION(Torus, Wave)

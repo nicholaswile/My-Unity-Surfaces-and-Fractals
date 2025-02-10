@@ -1,5 +1,5 @@
 # My Unity Surfaces and Fractals
-Various C#/HLSL samples for Unity with a focus on comparing different ways to render geometry and the variations in performance. Includes my implementations of Jasper Flick's demos on compute shaders, Unity Jobs, and organic variety from <a href="https://catlikecoding.com/">Catlike Coding</a>. My code may serve as a reference for learners who want to have the final source code to compare their own project to. My code works with Unity 2021, and I use the default standard render pipeline. To use with URP, the shaders must be convereted to ShaderGraph.
+Various C#/HLSL samples for Unity with a focus on comparing different ways to render geometry and the variations in performance. Includes my implementations of Jasper Flick's demos on compute shaders, Unity Jobs, and organic variety from <a href="https://catlikecoding.com/">Catlike Coding</a>. My implementation may serve as a reference for learners to compare their own project to. My code works with Unity 2021, and I use the default standard render pipeline. To use with URP, the shaders must be convereted to ShaderGraph.
 
 <!--
 <img src="screenshots/Unity_Ripple.gif">
